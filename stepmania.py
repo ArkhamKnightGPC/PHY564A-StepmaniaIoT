@@ -10,6 +10,8 @@ RESOURCE_PATH = Path("./Resources/").absolute()
 DIR_DICT = {0: "left", 1: "down", 2: "up", 3: "right"}
 ARROW_SIZE = 100
 WIDTH, HEIGHT = 600, 800
+MEASURE_MARGIN = 4 # number of measures to summon the arrows before they reach the markers at ZERO_Y
+ZERO_Y = 50
 
 def get_arrow_x(direction: str, screen_width: int, arrow_width: int, area_width: int):
     """Gets the x position of an arrow given its direction"""
@@ -38,12 +40,19 @@ class stepmania:
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
         Arrow._load_images()
+        MarkerArrow._load_image()
 
         # Arrow properties
         self.bottom_y = HEIGHT - 100  # Where arrows should be hit
         self.SCROLL_SPEED = 50
         
         self.running = False
+        self.arrow_markers: tuple[MarkerArrow, MarkerArrow, MarkerArrow, MarkerArrow] = (
+            MarkerArrow("left"),
+            MarkerArrow("down"),
+            MarkerArrow("up"),
+            MarkerArrow("right")
+        )
         self.arrows: list[Arrow] = []
         self.measure_lines: list[MeasureLine] = []
 
@@ -79,6 +88,8 @@ class stepmania:
                 
             
             # Update and draw arrows
+            for marker_arrow in self.arrow_markers:
+                marker_arrow.draw(self.screen)
             for measure_line in self.measure_lines:
                 measure_line.update(current_time, HEIGHT, self.SCROLL_SPEED, self.BPM)
                 if measure_line.y < -50:
@@ -190,8 +201,14 @@ class Arrow:
             raise ValueError(f"Invalid direction {direction}")
         
     def update(self, current_time, height: int, scroll_speed: int, BPM: int):
-        beats_elapsed = (current_time - self.spawn_time) / (60 / BPM)
-        self.y = height - (beats_elapsed * scroll_speed) - ARROW_SIZE//2
+        time_1_measure = 4*60/BPM
+        speed = scroll_speed
+        spawn_y = ZERO_Y + 4 * time_1_measure * speed
+
+        t = current_time - self.spawn_time
+        self.y = ZERO_Y + (spawn_y - ZERO_Y)*(1 - t / (4 * time_1_measure)) - ARROW_SIZE//2
+
+
 
     def draw(self, screen: pygame.Surface):
         screen.blit(self.img, (self.x, self.y))
@@ -219,15 +236,46 @@ class MeasureLine:
         self.x = 0
         self.y = 0
         # # red
-        # self.img = pygame.Surface((WIDTH, MeasureLine.H))
-        # self.img.fill((255, 0, 0))
+        self.img = pygame.Surface((WIDTH, MeasureLine.H))
+        self.img.fill((255, 0, 0))
 
     def update(self, current_time, height: int, scroll_speed: int, BPM: int):
-        beats_elapsed = (current_time - self.spawn_time) / (60 / BPM)
-        self.y = height - (beats_elapsed * scroll_speed) - MeasureLine.H//2
+        time_1_measure = 4*60/BPM
+        speed = scroll_speed
+        spawn_y = ZERO_Y + 4 * time_1_measure * speed
+
+        t = current_time - self.spawn_time
+        self.y = ZERO_Y + (spawn_y - ZERO_Y)*(1 - t / (4 * time_1_measure)) - MeasureLine.H//2
 
     def draw(self, screen: pygame.Surface):
         screen.blit(self.img, (self.x, self.y))
+
+class MarkerArrow:
+    marker_img: pygame.Surface = None
+    """Class to represent an marker arrow asset"""
+    arrow_imgs : dict[str, pygame.Surface]= {}
+    def __init__(self, direction: Literal["left","up","right","down"] = "left"):
+        self.x = get_arrow_x(direction, WIDTH, ARROW_SIZE, WIDTH//2)
+        self.y = 50 # TODO
+        if direction == "left":
+            self.img = MarkerArrow.marker_img
+        elif direction == "down":
+            self.img = pygame.transform.rotate(MarkerArrow.marker_img, 90)
+        elif direction == "right":
+            self.img = pygame.transform.rotate(MarkerArrow.marker_img, 180)
+        elif direction == "up":
+            self.img = pygame.transform.rotate(MarkerArrow.marker_img, 270)
+        else:
+            raise ValueError(f"Invalid direction {direction}")
+        
+    def draw(self, screen: pygame.Surface):
+        screen.blit(self.img, (self.x, self.y))
+
+    @staticmethod
+    def _load_image():
+        MarkerArrow.marker_img = pygame.image.load(RESOURCE_PATH / "ArrowMarker.png")
+        MarkerArrow.marker_img = pygame.transform.scale(MarkerArrow.marker_img, (ARROW_SIZE, ARROW_SIZE))
+
 
 
 if __name__ == "__main__":
