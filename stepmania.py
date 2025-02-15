@@ -45,6 +45,7 @@ class stepmania:
         
         self.running = False
         self.arrows: list[Arrow] = []
+        self.measure_lines: list[MeasureLine] = []
 
         self.next_arrow_time = 0
         self.start_time = 0
@@ -73,17 +74,23 @@ class stepmania:
                 if self.do_measure:
                     self.do_measure()
                 
+                # spawn measure line
+                self.measure_lines.append(MeasureLine(current_time))
+                
             
             # Update and draw arrows
-            to_remove: list[Arrow] = []
-            for arrow in self.arrows[:]:
+            for measure_line in self.measure_lines:
+                measure_line.update(current_time, HEIGHT, self.SCROLL_SPEED, self.BPM)
+                if measure_line.y < -50:
+                    self.measure_lines.remove(measure_line)
+                else:
+                    measure_line.draw(self.screen)
+            for arrow in self.arrows:
                 arrow.update(current_time, HEIGHT, self.SCROLL_SPEED, self.BPM)
                 if arrow.y < -50:
-                    to_remove.append(arrow)
+                    self.arrows.remove(arrow)
                 else:
                     arrow.draw(self.screen)
-            for arrow in to_remove:
-                self.arrows.remove(arrow)
 
             # Event handling
             for event in pygame.event.get():
@@ -91,9 +98,9 @@ class stepmania:
                     self.running = False
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_z:
-                        self.SCROLL_SPEED += 50
+                        self.SCROLL_SPEED = self.SCROLL_SPEED * 1.1
                     elif event.key == pygame.K_s:
-                        self.SCROLL_SPEED -= 50
+                        self.SCROLL_SPEED = self.SCROLL_SPEED * 0.9
                     elif event.key == pygame.K_a:
                         self.BPM += 20
                     elif event.key == pygame.K_q:
@@ -125,16 +132,43 @@ class stepmania:
         if len(arrow_lines) == 0:
             return
         
-        time_offset = 60 / self.BPM * 4 / len(arrow_lines)
+        time_offset = 60 / self.BPM * 4 / len(arrow_lines)       
+
         for i, arrow_line in enumerate(arrow_lines):
+            # Supported up to 24 beats per tempo
+            if (48*4) % len(arrow_lines) != 0:
+                raise ValueError(f"Invalid number of arrows {len(arrow_lines)} for a measure, should divide 48*4.")
+            
+            color = "white" # default color
+            beat_offset = (i * (48 * 4 // len(arrow_lines))) % 48
+
+            if beat_offset == 0: # i % 48 == 0
+                color = "red" # beat
+            elif beat_offset % 24 == 0:
+                color = "blue" # 1/2 beat
+            elif beat_offset % 16 == 0: 
+                color = "purple" # 1/3 beat
+            elif beat_offset % 12 == 0:
+                color = "green" # 1/4 beat
+            elif beat_offset % 8 == 0:
+                color = "pink" # 1/6 beat
+            elif beat_offset % 6 == 0:
+                color = "yellow" # 1/8 beat
+            elif beat_offset % 4 == 0:
+                color = "cyan" # 1/16 beat
+            elif beat_offset % 3 == 0:
+                color = "magenta" # 1/12 beat
+            else:
+                color = "white"            
+            
             if arrow_line[0]:
-                self.spawn_arrow("left", "red", measure_begin_time + time_offset * i)
+                self.spawn_arrow("left", color, measure_begin_time + time_offset * i)
             if arrow_line[1]:
-                self.spawn_arrow("down", "red", measure_begin_time + time_offset * i)
+                self.spawn_arrow("down", color, measure_begin_time + time_offset * i)
             if arrow_line[2]:
-                self.spawn_arrow("up", "red", measure_begin_time + time_offset * i)
+                self.spawn_arrow("up", color, measure_begin_time + time_offset * i)
             if arrow_line[3]:
-                self.spawn_arrow("right", "red", measure_begin_time + time_offset * i)
+                self.spawn_arrow("right", color, measure_begin_time + time_offset * i)
                 
 
 class Arrow:
@@ -157,7 +191,7 @@ class Arrow:
         
     def update(self, current_time, height: int, scroll_speed: int, BPM: int):
         beats_elapsed = (current_time - self.spawn_time) / (60 / BPM)
-        self.y = height - (beats_elapsed * scroll_speed)
+        self.y = height - (beats_elapsed * scroll_speed) - ARROW_SIZE//2
 
     def draw(self, screen: pygame.Surface):
         screen.blit(self.img, (self.x, self.y))
@@ -170,26 +204,45 @@ class Arrow:
         Arrow.arrow_imgs["green"] = pygame.image.load(RESOURCE_PATH / "ArrowGreen.png")
         Arrow.arrow_imgs["yellow"] = pygame.image.load(RESOURCE_PATH / "ArrowYellow.png")
         Arrow.arrow_imgs["purple"] = pygame.image.load(RESOURCE_PATH / "ArrowPurple.png")
-        Arrow.arrow_imgs["orange"] = pygame.image.load(RESOURCE_PATH / "ArrowMagenta.png")
+        Arrow.arrow_imgs["magenta"] = pygame.image.load(RESOURCE_PATH / "ArrowMagenta.png")
         Arrow.arrow_imgs["cyan"] = pygame.image.load(RESOURCE_PATH / "ArrowCyan.png")
-        Arrow.arrow_imgs["white"] = pygame.image.load(RESOURCE_PATH / "ArrowPink.png")
+        Arrow.arrow_imgs["pink"] = pygame.image.load(RESOURCE_PATH / "ArrowPink.png")
+        Arrow.arrow_imgs["white"] = pygame.image.load(RESOURCE_PATH / "ArrowWhite.png")
         for arrow_name in Arrow.arrow_imgs:
             Arrow.arrow_imgs[arrow_name] = pygame.transform.scale(Arrow.arrow_imgs[arrow_name], (ARROW_SIZE, ARROW_SIZE))
 
 
+class MeasureLine:
+    H = 10
+    def __init__(self, spawn_time: float):
+        self.spawn_time = spawn_time
+        self.x = 0
+        self.y = 0
+        # # red
+        # self.img = pygame.Surface((WIDTH, MeasureLine.H))
+        # self.img.fill((255, 0, 0))
+
+    def update(self, current_time, height: int, scroll_speed: int, BPM: int):
+        beats_elapsed = (current_time - self.spawn_time) / (60 / BPM)
+        self.y = height - (beats_elapsed * scroll_speed) - MeasureLine.H//2
+
+    def draw(self, screen: pygame.Surface):
+        screen.blit(self.img, (self.x, self.y))
+
+
 if __name__ == "__main__":
     game = stepmania()
-    game.start_threaded()
-    # for i in range(10):
-    #     block = []
-    #     for i in range(np.random.randint(1,5)):
-    #         block.append(random_arrow_line(np.random.randint(1,5)))
-    #     game.arrow_block_queue.append(block)
+    block1 = []
+    for i in range(np.random.randint(1,5)):
+        block1.append(random_arrow_line(np.random.randint(1,5)))
+    game.arrow_block_queue.append(block1)
     def do_measure_make_new_block():
         block = []
-        for i in range(np.random.randint(1,5)):
+        choices = [1,2,3,4,6,8,12,16,24,48]
+        p = [1/2, 1/4, 1/8, 1/16, 1/32, 1/64, 1/128, 1/256, 1/512, 1/512]
+        for i in range(np.random.choice(choices, p=p)):
             block.append(random_arrow_line(np.random.randint(1,5)))
         game.arrow_block_queue.append(block)
     game.do_measure = do_measure_make_new_block
-    input("Keeping alive. Press enter to quit...")
+    game.start()
     pygame.quit()
