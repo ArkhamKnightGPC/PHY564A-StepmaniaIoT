@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Literal, Callable
 from collections import deque
 import threading
+from itertools import chain
 
 RESOURCE_PATH = Path("./Resources/").absolute()
 DIR_DICT = {0: "left", 1: "down", 2: "up", 3: "right"}
+DIR_DICT_INV = {"left": 0, "down": 1, "up": 2, "right": 3}
 ARROW_SIZE = 100
 WIDTH, HEIGHT = 600, 800
 MEASURE_MARGIN = 4 # number of measures to summon the arrows before they reach the markers at ZERO_Y
@@ -54,7 +56,7 @@ class stepmania:
             MarkerArrow("up"),
             MarkerArrow("right")
         )
-        self.arrows: list[Arrow] = []
+        self.arrows: tuple[list[Arrow]] = ([], [], [], []) # Arrows for each direction
         self.measure_lines: list[MeasureLine] = []
 
         self.next_measure_time= 0
@@ -97,12 +99,16 @@ class stepmania:
                     self.measure_lines.remove(measure_line)
                 else:
                     measure_line.draw(self.screen)
-            for arrow in self.arrows:
-                arrow.update(current_time, HEIGHT, self.SCROLL_SPEED, self.BPM)
-                if arrow.y < -50:
-                    self.arrows.remove(arrow)
-                else:
-                    arrow.draw(self.screen)
+
+            def do_arrow_draw(dir_index: int) -> None: # for all arrows
+                for arrow in self.arrows[dir_index]:
+                    arrow.update(current_time, HEIGHT, self.SCROLL_SPEED, self.BPM)
+                    if arrow.y < -50:
+                        self.arrows[dir_index].remove(arrow)
+                    else:
+                        arrow.draw(self.screen)    
+            for dir_index in range(len(self.arrows)):
+                do_arrow_draw(dir_index)
 
             # Event handling
             for event in pygame.event.get():
@@ -117,17 +123,26 @@ class stepmania:
                         self.BPM += 20
                     elif event.key == pygame.K_q:
                         self.BPM -= 20
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    to_remove = []
-                    for arrow in self.arrows:
-                        time_1_measure = 4*60/self.BPM
-                        arrow_0_time = arrow.spawn_time + time_1_measure * 4
-
-                        if self.score_recorder.check_hit(current_time, arrow_0_time):
-                            to_remove.append(arrow)
-                    for arrow in to_remove:
-                        self.arrows.remove(arrow)
-            
+                    else:
+                        def do_arrow_hit(dir_index: int) -> None:
+                            to_remove = []
+                            time_1_measure = 4*60/self.BPM
+                            for arrow in self.arrows[dir_index]:
+                                arrow_0_time = arrow.spawn_time + time_1_measure * 4
+                                if self.score_recorder.check_hit(current_time, arrow_0_time):
+                                    to_remove.append(arrow)
+                            for arrow in to_remove:
+                                self.arrows[dir_index].remove(arrow)
+                        if event.key == pygame.K_LEFT:
+                            do_arrow_hit(DIR_DICT_INV["left"])
+                        elif event.key == pygame.K_DOWN:
+                            do_arrow_hit(DIR_DICT_INV["down"])
+                        elif event.key == pygame.K_UP:
+                            do_arrow_hit(DIR_DICT_INV["up"])
+                        elif event.key == pygame.K_RIGHT:
+                            do_arrow_hit(DIR_DICT_INV["right"])
+                        # else:
+                        #     print(f"Key pressed: {event.key}, {pygame.key.name(event.key)}, {pygame.K_LEFT}")
             pygame.display.flip()
             self.clock.tick(60)
 
@@ -147,7 +162,7 @@ class stepmania:
     def spawn_arrow(self, direction: Literal["left","up","right","down"], color: Literal["blue","red","green","yellow","purple","orange","cyan","white"], spawn_time: float):
         """Spawns an arrow at a given time"""
         arrow = Arrow(spawn_time, direction, color)
-        self.arrows.append(arrow)
+        self.arrows[DIR_DICT_INV[direction]].append(arrow)
     
     def spawn_arrow_block(self, measure_begin_time: float, arrow_lines: "list[ tuple[ bool, bool, bool, bool] ]"):
         """Spawns a block of arrows at a given time"""
@@ -201,7 +216,7 @@ class ScoreRecorder:
     
     def check_hit(self, current_time: float, arrow_0_time: float) -> bool:
         """Checks if the player hit an arrow. Returns True if the arrow was hit."""
-        if abs(current_time - arrow_0_time) < 5:
+        if abs(current_time - arrow_0_time) < 0.2:
             self.score += 1
             self.tap_sound.play(maxtime=500)
             return True
