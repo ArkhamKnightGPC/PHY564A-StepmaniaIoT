@@ -44,6 +44,7 @@ class stepmania:
         Arrow._load_images()
         MarkerArrow._load_image()
         self.score_recorder = ScoreRecorder()
+        self.font = pygame.font.Font(None, 36)
 
         # Arrow properties
         self.bottom_y = HEIGHT - 100  # Where arrows should be hit
@@ -61,7 +62,7 @@ class stepmania:
 
         self.next_measure_time= 0
         self.start_time = 0
-        self.BPM = 300
+        self.BPM = 120
 
         self.arrow_block_queue = deque()
         self.do_measure : Callable[[], None] = None # Function to call when a measure is reached
@@ -73,7 +74,7 @@ class stepmania:
         self.start_time = time.perf_counter()
         self.next_measure_time = self.start_time
 
-        while self.running:
+        while self.running: # Main loop
             self.screen.fill((0, 0, 0))
             current_time = time.perf_counter()
 
@@ -90,7 +91,10 @@ class stepmania:
                 self.measure_lines.append(MeasureLine(current_time))
                 
             
-            # Update and draw arrows
+            # Draw and updates
+            self.draw_text(f"Score: {self.score_recorder.score}", 10, 10)
+            self.draw_text(f"BPM: {self.BPM}", 10, 40)
+            self.draw_text(f"Speed: {self.SCROLL_SPEED}", 10, 70)
             for marker_arrow in self.arrow_markers:
                 marker_arrow.draw(self.screen)
             for measure_line in self.measure_lines:
@@ -105,6 +109,7 @@ class stepmania:
                     arrow.update(current_time, HEIGHT, self.SCROLL_SPEED, self.BPM)
                     if arrow.y < -50:
                         self.arrows[dir_index].remove(arrow)
+                        self.score_recorder.record_miss()
                     else:
                         arrow.draw(self.screen)    
             for dir_index in range(len(self.arrows)):
@@ -207,6 +212,10 @@ class stepmania:
             if arrow_line[3]:
                 self.spawn_arrow("right", color, measure_begin_time + time_offset * i)
                 
+    def draw_text(self, text: str, x: int, y: int):
+        """Draws text on the screen"""
+        text_surface = self.font.render(text, True, (255, 255, 255))
+        self.screen.blit(text_surface, (x, y))
 class ScoreRecorder:
     """Class to record the score of a player"""
     def __init__(self):
@@ -216,11 +225,15 @@ class ScoreRecorder:
     
     def check_hit(self, current_time: float, arrow_0_time: float) -> bool:
         """Checks if the player hit an arrow. Returns True if the arrow was hit."""
-        if abs(current_time - arrow_0_time) < 0.2:
+        if abs(current_time - arrow_0_time) < 0.3:
             self.score += 1
             self.tap_sound.play(maxtime=500)
             return True
         return False
+    
+    def record_miss(self):
+        """Records a miss"""
+        self.score -= 1
     
 
 class Arrow:
@@ -323,24 +336,19 @@ if __name__ == "__main__":
     game = stepmania()
     block1 = []
     for i in range(np.random.randint(1,5)):
-        block1.append(random_arrow_line(np.random.randint(1,5)))
+        block1.append(random_arrow_line(np.random.randint(1,2)))
     game.arrow_block_queue.append(block1)
     def do_measure_make_new_block():
         block = []
-        choices_p = {1: 1/2,
-                     2: 1/4,
-                     3: 1/8,
-                     4: 1/16,
-                     6: 1/32,
-                     8: 1/64,
-                     12: 1/128,
-                     16: 1/256,
-                     24: 1/512,
-                     48: 1/512}
+        choices_p = { # num of arrows : probability
+            1: 1/6,
+            2: 1/3,
+            4: 1/3,
+            8: 1/6,}
         keys = [i for i in choices_p.keys()]
         values = [i for i in choices_p.values()]
         for i in range(np.random.choice(keys, p=values)): # 4 beats
-            block.append(random_arrow_line(np.random.randint(1,5)))
+            block.append(random_arrow_line(np.random.randint(1,2)))
         game.arrow_block_queue.append(block)
     game.do_measure = do_measure_make_new_block
     game.start()
