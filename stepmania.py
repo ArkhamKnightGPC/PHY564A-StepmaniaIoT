@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Literal, Callable
 from collections import deque
 import threading
+from itertools import chain
 
 RESOURCE_PATH = Path("./Resources/").absolute()
 DIR_DICT = {0: "left", 1: "down", 2: "up", 3: "right"}
+DIR_DICT_INV = {"left": 0, "down": 1, "up": 2, "right": 3}
 ARROW_SIZE = 100
 WIDTH, HEIGHT = 600, 800
 MEASURE_MARGIN = 4 # number of measures to summon the arrows before they reach the markers at ZERO_Y
@@ -41,10 +43,12 @@ class stepmania:
         self.clock = pygame.time.Clock()
         Arrow._load_images()
         MarkerArrow._load_image()
+        self.score_recorder = ScoreRecorder()
+        self.font = pygame.font.Font(None, 36)
 
         # Arrow properties
         self.bottom_y = HEIGHT - 100  # Where arrows should be hit
-        self.SCROLL_SPEED = 50
+        self.SCROLL_SPEED = 200
         
         self.running = False
         self.arrow_markers: tuple[MarkerArrow, MarkerArrow, MarkerArrow, MarkerArrow] = (
@@ -53,12 +57,12 @@ class stepmania:
             MarkerArrow("up"),
             MarkerArrow("right")
         )
-        self.arrows: list[Arrow] = []
+        self.arrows: tuple[list[Arrow]] = ([], [], [], []) # Arrows for each direction
         self.measure_lines: list[MeasureLine] = []
 
-        self.next_arrow_time = 0
+        self.next_measure_time= 0
         self.start_time = 0
-        self.BPM = 300
+        self.BPM = 120
 
         self.arrow_block_queue = deque()
         self.do_measure : Callable[[], None] = None # Function to call when a measure is reached
@@ -68,15 +72,15 @@ class stepmania:
         """Starts the game loop"""
         self.running = True
         self.start_time = time.perf_counter()
-        self.next_arrow_time = self.start_time
+        self.next_measure_time = self.start_time
 
-        while self.running:
+        while self.running: # Main loop
             self.screen.fill((0, 0, 0))
             current_time = time.perf_counter()
 
             # Spawn new arrows at whole measures (4 beats)
-            if current_time >= self.next_arrow_time:
-                self.next_arrow_time += 4*60 / self.BPM
+            if current_time >= self.next_measure_time:
+                self.next_measure_time += 4*60 / self.BPM
                 if len(self.arrow_block_queue) > 0:
                     block = self.arrow_block_queue.popleft()
                     self.spawn_arrow_block(current_time, block)
@@ -87,7 +91,10 @@ class stepmania:
                 self.measure_lines.append(MeasureLine(current_time))
                 
             
-            # Update and draw arrows
+            # Draw and updates
+            self.draw_text(f"Score: {self.score_recorder.score}", 10, 10)
+            self.draw_text(f"BPM: {self.BPM}", 10, 40)
+            self.draw_text(f"Speed: {self.SCROLL_SPEED}", 10, 70)
             for marker_arrow in self.arrow_markers:
                 marker_arrow.draw(self.screen)
             for measure_line in self.measure_lines:
@@ -96,12 +103,17 @@ class stepmania:
                     self.measure_lines.remove(measure_line)
                 else:
                     measure_line.draw(self.screen)
-            for arrow in self.arrows:
-                arrow.update(current_time, HEIGHT, self.SCROLL_SPEED, self.BPM)
-                if arrow.y < -50:
-                    self.arrows.remove(arrow)
-                else:
-                    arrow.draw(self.screen)
+
+            def do_arrow_draw(dir_index: int) -> None: # for all arrows
+                for arrow in self.arrows[dir_index]:
+                    arrow.update(current_time, HEIGHT, self.SCROLL_SPEED, self.BPM)
+                    if arrow.y < -50:
+                        self.arrows[dir_index].remove(arrow)
+                        self.score_recorder.record_miss()
+                    else:
+                        arrow.draw(self.screen)    
+            for dir_index in range(len(self.arrows)):
+                do_arrow_draw(dir_index)
 
             # Event handling
             for event in pygame.event.get():
@@ -116,7 +128,26 @@ class stepmania:
                         self.BPM += 20
                     elif event.key == pygame.K_q:
                         self.BPM -= 20
-            
+                    else:
+                        def do_arrow_hit(dir_index: int) -> None:
+                            to_remove = []
+                            time_1_measure = 4*60/self.BPM
+                            for arrow in self.arrows[dir_index]:
+                                arrow_0_time = arrow.spawn_time + time_1_measure * 4
+                                if self.score_recorder.check_hit(current_time, arrow_0_time):
+                                    to_remove.append(arrow)
+                            for arrow in to_remove:
+                                self.arrows[dir_index].remove(arrow)
+                        if event.key == pygame.K_LEFT:
+                            do_arrow_hit(DIR_DICT_INV["left"])
+                        elif event.key == pygame.K_DOWN:
+                            do_arrow_hit(DIR_DICT_INV["down"])
+                        elif event.key == pygame.K_UP:
+                            do_arrow_hit(DIR_DICT_INV["up"])
+                        elif event.key == pygame.K_RIGHT:
+                            do_arrow_hit(DIR_DICT_INV["right"])
+                        # else:
+                        #     print(f"Key pressed: {event.key}, {pygame.key.name(event.key)}, {pygame.K_LEFT}")
             pygame.display.flip()
             self.clock.tick(60)
 
@@ -124,19 +155,19 @@ class stepmania:
         """Stops the game loop"""
         self.running = False
     
-    def start_threaded(self):
-        """Starts the game loop in a new thread"""
-        self.running = True
-        self.start_time = time.perf_counter()
-        self.next_arrow_time = self.start_time
-        self.thread = threading.Thread(target=self.start)
-        self.thread.start()
-        return self.thread
+    # def start_threaded(self):
+    #     """Starts the game loop in a new thread"""
+    #     self.running = True
+    #     self.start_time = time.perf_counter()
+    #     self.next_measure_time = self.start_time
+    #     self.thread = threading.Thread(target=self.start)
+    #     self.thread.start()
+    #     return self.thread
     
     def spawn_arrow(self, direction: Literal["left","up","right","down"], color: Literal["blue","red","green","yellow","purple","orange","cyan","white"], spawn_time: float):
         """Spawns an arrow at a given time"""
         arrow = Arrow(spawn_time, direction, color)
-        self.arrows.append(arrow)
+        self.arrows[DIR_DICT_INV[direction]].append(arrow)
     
     def spawn_arrow_block(self, measure_begin_time: float, arrow_lines: "list[ tuple[ bool, bool, bool, bool] ]"):
         """Spawns a block of arrows at a given time"""
@@ -181,6 +212,29 @@ class stepmania:
             if arrow_line[3]:
                 self.spawn_arrow("right", color, measure_begin_time + time_offset * i)
                 
+    def draw_text(self, text: str, x: int, y: int):
+        """Draws text on the screen"""
+        text_surface = self.font.render(text, True, (255, 255, 255))
+        self.screen.blit(text_surface, (x, y))
+class ScoreRecorder:
+    """Class to record the score of a player"""
+    def __init__(self):
+        """Class to record the score of a player"""
+        self.score = 0
+        self.tap_sound = pygame.mixer.Sound(RESOURCE_PATH / "GameplayAssist clap.ogg")
+    
+    def check_hit(self, current_time: float, arrow_0_time: float) -> bool:
+        """Checks if the player hit an arrow. Returns True if the arrow was hit."""
+        if abs(current_time - arrow_0_time) < 0.3:
+            self.score += 1
+            self.tap_sound.play(maxtime=500)
+            return True
+        return False
+    
+    def record_miss(self):
+        """Records a miss"""
+        self.score -= 1
+    
 
 class Arrow:
     """Class to represent an arrow asset"""
@@ -282,14 +336,19 @@ if __name__ == "__main__":
     game = stepmania()
     block1 = []
     for i in range(np.random.randint(1,5)):
-        block1.append(random_arrow_line(np.random.randint(1,5)))
+        block1.append(random_arrow_line(np.random.randint(1,2)))
     game.arrow_block_queue.append(block1)
     def do_measure_make_new_block():
         block = []
-        choices = [1,2,3,4,6,8,12,16,24,48]
-        p = [1/2, 1/4, 1/8, 1/16, 1/32, 1/64, 1/128, 1/256, 1/512, 1/512]
-        for i in range(np.random.choice(choices, p=p)):
-            block.append(random_arrow_line(np.random.randint(1,5)))
+        choices_p = { # num of arrows : probability
+            1: 1/6,
+            2: 1/3,
+            4: 1/3,
+            8: 1/6,}
+        keys = [i for i in choices_p.keys()]
+        values = [i for i in choices_p.values()]
+        for i in range(np.random.choice(keys, p=values)): # 4 beats
+            block.append(random_arrow_line(np.random.randint(1,2)))
         game.arrow_block_queue.append(block)
     game.do_measure = do_measure_make_new_block
     game.start()
