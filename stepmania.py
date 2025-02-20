@@ -13,7 +13,7 @@ DIR_DICT_INV = {"left": 0, "down": 1, "up": 2, "right": 3}
 ARROW_SIZE = 100
 WIDTH, HEIGHT = 600, 800
 MEASURE_MARGIN = 4 # number of measures to summon the arrows before they reach the markers at ZERO_Y
-ZERO_Y = 50
+ZERO_Y = 80
 
 def get_arrow_x(direction: str, screen_width: int, arrow_width: int, area_width: int):
     """Gets the x position of an arrow given its direction"""
@@ -136,6 +136,7 @@ class stepmania:
                                 arrow_0_time = arrow.spawn_time + time_1_measure * 4
                                 if self.score_recorder.check_hit(current_time, arrow_0_time):
                                     to_remove.append(arrow)
+                                    break # only hit one arrow
                             for arrow in to_remove:
                                 self.arrows[dir_index].remove(arrow)
                         if event.key == pygame.K_LEFT:
@@ -225,7 +226,7 @@ class ScoreRecorder:
     
     def check_hit(self, current_time: float, arrow_0_time: float) -> bool:
         """Checks if the player hit an arrow. Returns True if the arrow was hit."""
-        if abs(current_time - arrow_0_time) < 0.3:
+        if abs(current_time - arrow_0_time) < 0.1:
             self.score += 1
             self.tap_sound.play(maxtime=500)
             return True
@@ -310,7 +311,7 @@ class MarkerArrow:
     arrow_imgs : dict[str, pygame.Surface]= {}
     def __init__(self, direction: Literal["left","up","right","down"] = "left"):
         self.x = get_arrow_x(direction, WIDTH, ARROW_SIZE, WIDTH//2)
-        self.y = 50 # TODO
+        self.y = ZERO_Y - ARROW_SIZE//2
         if direction == "left":
             self.img = MarkerArrow.marker_img
         elif direction == "down":
