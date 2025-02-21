@@ -331,7 +331,7 @@ class MarkerArrow:
         MarkerArrow.marker_img = pygame.image.load(RESOURCE_PATH / "ArrowMarker.png")
         MarkerArrow.marker_img = pygame.transform.scale(MarkerArrow.marker_img, (ARROW_SIZE, ARROW_SIZE))
 
-
+# class EventExt(pygame.event.Event):
 
 if __name__ == "__main__":
     game = stepmania()
