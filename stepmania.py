@@ -6,7 +6,9 @@ from typing import Literal, Callable
 from collections import deque
 import threading
 from itertools import chain
+from BluetoothImplementation import bluetooth_definition as bt
 
+BTCLIENTS = ["E8:31:CD:CB:2F:EE"]
 RESOURCE_PATH = Path("./Resources/").absolute()
 DIR_DICT = {0: "left", 1: "down", 2: "up", 3: "right"}
 DIR_DICT_INV = {"left": 0, "down": 1, "up": 2, "right": 3}
@@ -38,6 +40,8 @@ class stepmania:
 
     def __init__(self):
         """Class to simulate a stepmania game"""
+        self.bluetooth_clients = bt.setup_bluetooth(*BTCLIENTS, use_mac_addresses=True)
+
         pygame.init()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
@@ -355,6 +359,10 @@ class MarkerArrow:
         MarkerArrow.marker_img = pygame.image.load(RESOURCE_PATH / "ArrowMarker.png")
         MarkerArrow.marker_img = pygame.transform.scale(MarkerArrow.marker_img, (ARROW_SIZE, ARROW_SIZE))
 
+class BeatSoundMaker:
+    def __init__(self):
+        self.beat_sounds = {}
+        # TODO
 
 # class EventExt(pygame.event.Event):
 
