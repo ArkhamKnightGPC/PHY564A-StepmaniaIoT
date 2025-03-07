@@ -6,7 +6,9 @@ from typing import Literal, Callable
 from collections import deque
 import threading
 from itertools import chain
+from BluetoothImplementation import bluetooth_definition as bt
 
+BTCLIENTS = ["E8:31:CD:CB:2F:EE"]
 RESOURCE_PATH = Path("./Resources/").absolute()
 DIR_DICT = {0: "left", 1: "down", 2: "up", 3: "right"}
 DIR_DICT_INV = {"left": 0, "down": 1, "up": 2, "right": 3}
@@ -38,6 +40,8 @@ class stepmania:
 
     def __init__(self):
         """Class to simulate a stepmania game"""
+        self.bluetooth_clients = bt.setup_bluetooth(*BTCLIENTS, use_mac_addresses=True)
+
         pygame.init()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
@@ -134,7 +138,7 @@ class stepmania:
                             time_1_measure = 4*60/self.BPM
                             for arrow in self.arrows[dir_index]:
                                 arrow_0_time = arrow.spawn_time + time_1_measure * 4
-                                if self.score_recorder.check_hit(current_time, arrow_0_time):
+                                if self.score_recorder.check_hit(current_time, arrow_0_time, dir_index):
                                     to_remove.append(arrow)
                                     break # only hit one arrow
                             for arrow in to_remove:
@@ -147,6 +151,8 @@ class stepmania:
                             do_arrow_hit(DIR_DICT_INV["up"])
                         elif event.key == pygame.K_RIGHT:
                             do_arrow_hit(DIR_DICT_INV["right"])
+                        elif event.key == pygame.K_ESCAPE:
+                            self.running = False
                         # else:
                         #     print(f"Key pressed: {event.key}, {pygame.key.name(event.key)}, {pygame.K_LEFT}")
             pygame.display.flip()
@@ -222,15 +228,37 @@ class ScoreRecorder:
     def __init__(self):
         """Class to record the score of a player"""
         self.score = 0
-        self.tap_sound = pygame.mixer.Sound(RESOURCE_PATH / "GameplayAssist clap.ogg")
-    
-    def check_hit(self, current_time: float, arrow_0_time: float) -> bool:
+        # self.tap_sound = pygame.mixer.Sound(RESOURCE_PATH / "GameplayAssist clap.ogg")
+        self.tap_sounds = {"clap": pygame.mixer.Sound(RESOURCE_PATH / "GameplayAssist clap.ogg")}
+        for i in range(1,65):
+            self.tap_sounds[f"piano_{i:03}"] = pygame.mixer.Sound(RESOURCE_PATH / "piano" / f"jobro__piano-ff-{i:03}.ogg")
+            print(f"Loaded piano_{i:03} at {RESOURCE_PATH / 'piano' / f'jobro__piano-ff-{i:03}.ogg'}")
+    def check_hit(self, current_time: float, arrow_0_time: float, dir_index: int) -> bool:
         """Checks if the player hit an arrow. Returns True if the arrow was hit."""
         if abs(current_time - arrow_0_time) < 0.1:
             self.score += 1
-            self.tap_sound.play(maxtime=500)
+            self.play_sound(dir_index)
             return True
         return False
+
+    def play_sound(self, dir_index: int):
+        """Plays a sound"""
+        # sound_name = np.random.choice(list(self.tap_sounds.keys())) # select random sound from dict
+        # self.tap_sounds[sound_name].play(maxtime=500)
+        
+        sound_left = self.tap_sounds[f"piano_{40:03}"] # do
+        sound_down = self.tap_sounds[f"piano_{44:03}"] # mi
+        sound_up = self.tap_sounds[f"piano_{47:03}"] # sol
+        sound_right = self.tap_sounds[f"piano_{52:03}"] # do
+        match dir_index:
+            case 0:
+                sound_left.play(maxtime=500)
+            case 1:
+                sound_down.play(maxtime=500)
+            case 2:
+                sound_up.play(maxtime=500)
+            case 3:
+                sound_right.play(maxtime=500)
     
     def record_miss(self):
         """Records a miss"""
@@ -331,7 +359,12 @@ class MarkerArrow:
         MarkerArrow.marker_img = pygame.image.load(RESOURCE_PATH / "ArrowMarker.png")
         MarkerArrow.marker_img = pygame.transform.scale(MarkerArrow.marker_img, (ARROW_SIZE, ARROW_SIZE))
 
+class BeatSoundMaker:
+    def __init__(self):
+        self.beat_sounds = {}
+        # TODO
 
+# class EventExt(pygame.event.Event):
 
 if __name__ == "__main__":
     game = stepmania()
