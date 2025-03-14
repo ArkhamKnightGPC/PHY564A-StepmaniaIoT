@@ -3,6 +3,7 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include "minHeap.hpp"
+#include "esp_timer.h"
 
 const int ledInputPins[4] = {26, 13, 16, 12};
 const int buttonOutputPins[4] = {25, 14, 17, 4};
@@ -79,11 +80,12 @@ void IRAM_ATTR ButtonEvent() {
     int buttonState = digitalRead(buttonOutputPins[i]);
     if(buttonState == 0){ //button pressed
       
-      float reactionTime = millis();
+      int64_t esp_time = esp_timer_get_time();
+      float reactionTime = float(esp_time);
       float arrowTime = arrowsColumns[i].extractMin();
 
-      if(abs(reactionTime - arrowTime) < 2){
-        String message = "HIT " + String(i) + " " + String(arrowTime);
+      if(abs(reactionTime - arrowTime) < 2 || true){
+        String message = "HIT " + String(i) + " " + String(arrowTime) + " " + String(reactionTime);
         sendMessage(message.c_str());//arrow has been popped from heap! we send message and move on!
       }else{
         arrowsColumns[i].insert(arrowTime); //insert time back into minHeap
