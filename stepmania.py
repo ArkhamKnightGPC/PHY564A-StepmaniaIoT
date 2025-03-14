@@ -35,12 +35,13 @@ def random_arrow_line(count: int):
     np.random.shuffle(arrow_line)  # Shuffle to randomize order
     return tuple(arrow_line)
 
-class stepmania:
+class Stepmania:
     """Class to simulate a stepmania game"""
 
     def __init__(self):
         """Class to simulate a stepmania game"""
         self.bluetooth_clients = bt.setup_bluetooth(*BTCLIENTS, use_mac_addresses=True)
+        self.bluetooth_clients[0].recv_message_callback = self._bluetooth_callback
 
         pygame.init()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -52,7 +53,7 @@ class stepmania:
 
         # Arrow properties
         self.bottom_y = HEIGHT - 100  # Where arrows should be hit
-        self.SCROLL_SPEED = 200
+        self.SCROLL_SPEED = 350
         
         self.running = False
         self.arrow_markers: tuple[MarkerArrow, MarkerArrow, MarkerArrow, MarkerArrow] = (
@@ -96,9 +97,9 @@ class stepmania:
                 
             
             # Draw and updates
-            self.draw_text(f"Score: {self.score_recorder.score}", 10, 10)
-            self.draw_text(f"BPM: {self.BPM}", 10, 40)
-            self.draw_text(f"Speed: {self.SCROLL_SPEED}", 10, 70)
+            self.draw_text(f"Score: {self.score_recorder.score} (combo: {self.score_recorder.combo})", 10, 10)
+            self.draw_text(f"BPM: {self.BPM:.2f}", 10, 40)
+            self.draw_text(f"Speed: {self.SCROLL_SPEED:.2f}", 10, 70)
             for marker_arrow in self.arrow_markers:
                 marker_arrow.draw(self.screen)
             for measure_line in self.measure_lines:
@@ -121,6 +122,16 @@ class stepmania:
 
             # Event handling
             for event in pygame.event.get():
+                def do_arrow_hit(dir_index: int) -> None:
+                    to_remove = []
+                    time_1_measure = 4*60/self.BPM
+                    for arrow in self.arrows[dir_index]:
+                        arrow_0_time = arrow.spawn_time + time_1_measure * 4
+                        if self.score_recorder.check_hit(current_time, arrow_0_time, dir_index):
+                            to_remove.append(arrow)
+                            break # only hit one arrow
+                    for arrow in to_remove:
+                        self.arrows[dir_index].remove(arrow)
                 if event.type == pygame.QUIT:
                     self.running = False
                 elif event.type == pygame.KEYDOWN:
@@ -133,16 +144,6 @@ class stepmania:
                     elif event.key == pygame.K_q:
                         self.BPM -= 20
                     else:
-                        def do_arrow_hit(dir_index: int) -> None:
-                            to_remove = []
-                            time_1_measure = 4*60/self.BPM
-                            for arrow in self.arrows[dir_index]:
-                                arrow_0_time = arrow.spawn_time + time_1_measure * 4
-                                if self.score_recorder.check_hit(current_time, arrow_0_time, dir_index):
-                                    to_remove.append(arrow)
-                                    break # only hit one arrow
-                            for arrow in to_remove:
-                                self.arrows[dir_index].remove(arrow)
                         if event.key == pygame.K_LEFT:
                             do_arrow_hit(DIR_DICT_INV["left"])
                         elif event.key == pygame.K_DOWN:
@@ -155,22 +156,18 @@ class stepmania:
                             self.running = False
                         # else:
                         #     print(f"Key pressed: {event.key}, {pygame.key.name(event.key)}, {pygame.K_LEFT}")
+                elif event.type == pygame.USEREVENT:
+                    if "arrow_timestamp" in event.dict and "dir_index" in event.dict:
+                        print(f"Received event: {event.dict["arrow_timestamp"]}, {event.dict["dir_index"]}")
+                        # self.score_recorder.check_hit(current_time, event.dict["arrow_timestamp"], event.dict["dir_index"])
+                        do_arrow_hit(event.dict["dir_index"])
             pygame.display.flip()
             self.clock.tick(60)
 
     def stop(self):
         """Stops the game loop"""
         self.running = False
-    
-    # def start_threaded(self):
-    #     """Starts the game loop in a new thread"""
-    #     self.running = True
-    #     self.start_time = time.perf_counter()
-    #     self.next_measure_time = self.start_time
-    #     self.thread = threading.Thread(target=self.start)
-    #     self.thread.start()
-    #     return self.thread
-    
+
     def spawn_arrow(self, direction: Literal["left","up","right","down"], color: Literal["blue","red","green","yellow","purple","orange","cyan","white"], spawn_time: float):
         """Spawns an arrow at a given time"""
         arrow = Arrow(spawn_time, direction, color)
@@ -223,47 +220,66 @@ class stepmania:
         """Draws text on the screen"""
         text_surface = self.font.render(text, True, (255, 255, 255))
         self.screen.blit(text_surface, (x, y))
+
+    def _bluetooth_callback(self, data: bytearray):
+        """Callback for bluetooth messages"""
+        print(f"Received message: {data}")
+        EventBT_parse_message_and_send_events(data, self)
+
 class ScoreRecorder:
     """Class to record the score of a player"""
+    ACCEPTABLE_SOUNDS = [28, 35, 40, 44, 47, 52, 56, 59, 64]
+
     def __init__(self):
         """Class to record the score of a player"""
         self.score = 0
+        self.combo = 0
         # self.tap_sound = pygame.mixer.Sound(RESOURCE_PATH / "GameplayAssist clap.ogg")
+        self.current_sound_index = 0
+        self.last_dir_index = 0
         self.tap_sounds = {"clap": pygame.mixer.Sound(RESOURCE_PATH / "GameplayAssist clap.ogg")}
-        for i in range(1,65):
+        for i in self.ACCEPTABLE_SOUNDS:
             self.tap_sounds[f"piano_{i:03}"] = pygame.mixer.Sound(RESOURCE_PATH / "piano" / f"jobro__piano-ff-{i:03}.ogg")
             print(f"Loaded piano_{i:03} at {RESOURCE_PATH / 'piano' / f'jobro__piano-ff-{i:03}.ogg'}")
+    
     def check_hit(self, current_time: float, arrow_0_time: float, dir_index: int) -> bool:
         """Checks if the player hit an arrow. Returns True if the arrow was hit."""
         if abs(current_time - arrow_0_time) < 0.1:
             self.score += 1
+            self.combo += 1
             self.play_sound(dir_index)
             return True
         return False
 
     def play_sound(self, dir_index: int):
         """Plays a sound"""
-        # sound_name = np.random.choice(list(self.tap_sounds.keys())) # select random sound from dict
-        # self.tap_sounds[sound_name].play(maxtime=500)
-        
-        sound_left = self.tap_sounds[f"piano_{40:03}"] # do
-        sound_down = self.tap_sounds[f"piano_{44:03}"] # mi
-        sound_up = self.tap_sounds[f"piano_{47:03}"] # sol
-        sound_right = self.tap_sounds[f"piano_{52:03}"] # do
-        match dir_index:
-            case 0:
-                sound_left.play(maxtime=500)
-            case 1:
-                sound_down.play(maxtime=500)
-            case 2:
-                sound_up.play(maxtime=500)
-            case 3:
-                sound_right.play(maxtime=500)
-    
+        new_index = 0
+        if dir_index == self.last_dir_index: # same
+            new_index = self.current_sound_index
+        else:
+            new_index_offset = dir_index - self.last_dir_index
+            if new_index_offset > 0: # right
+                min_index = self.current_sound_index + new_index_offset
+                min_index = min(min_index, len(self.ACCEPTABLE_SOUNDS)-2)
+                max_index = len(self.ACCEPTABLE_SOUNDS)-1
+                print(f"min_index: {min_index}, max_index: {max_index}")
+                new_index = np.random.randint(min_index, max_index)
+            else: # left
+                min_index = 0
+                max_index = self.current_sound_index + new_index_offset
+                max_index = max(1, max_index)
+                print(f"min_index: {min_index}, max_index: {max_index}")
+                new_index = np.random.randint(min_index, max_index)
+
+        sound = self.tap_sounds[f"piano_{self.ACCEPTABLE_SOUNDS[new_index]:03}"]
+        sound.play(maxtime=500)
+        print(f"======\ndir_index: {dir_index}\nlast_dir_index: {self.last_dir_index},\ncurrent_sound_index: {self.current_sound_index},\nnew_index: {new_index}")
+        self.last_dir_index = dir_index # update
+        self.current_sound_index = new_index
     def record_miss(self):
         """Records a miss"""
         self.score -= 1
-    
+        self.combo = 0
 
 class Arrow:
     """Class to represent an arrow asset"""
@@ -364,10 +380,25 @@ class BeatSoundMaker:
         self.beat_sounds = {}
         # TODO
 
-# class EventExt(pygame.event.Event):
+def EventBT_parse_message_and_send_events(message: bytearray, game) -> None:
+    """Parses a bluetooth message to spawn the relevant events."""
+    # decode bluetooth message as string as ascii
+    try:
+        message_str = message.decode("ascii")
+        _, i, tarrow, treaction = message_str.split(" ")
+        i, tarrow, treaction = int(i) - 1, float(tarrow), float(treaction)
+        # hit_str, i = message_str.split(" ")
+        # i = int(i) - 1
+    except Exception as e:
+        print(f"Error parsing message: {e}")
+        return 
+    type_ = pygame.USEREVENT
+    dict_ = {"dir_index": i}
+    event = pygame.event.Event(type_, dict_)
+    pygame.event.post(event)
 
 if __name__ == "__main__":
-    game = stepmania()
+    game = Stepmania()
     block1 = []
     for i in range(np.random.randint(1,5)):
         block1.append(random_arrow_line(np.random.randint(1,2)))

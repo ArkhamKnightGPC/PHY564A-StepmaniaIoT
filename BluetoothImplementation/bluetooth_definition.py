@@ -19,24 +19,6 @@ class BluetoothDeviceFinder:
         return bluetooth.discover_devices(
             duration=8, lookup_names=True, flush_cache=True, lookup_class=False)
 
-    def search_for(self, device_name: str) -> str:
-        """Search for the bluetooth device with the given name.
-        
-        Args:
-            device_name (str): The name of the device to search for.
-        Return:
-            str: The address of the device.
-        """
-        nearby_devices = self.browse_devices()
-        
-        for addr, name in nearby_devices:
-            print(f"Found: {addr} - {name}")
-
-        for addr, name in nearby_devices:
-            if name == device_name:
-                return addr
-        return None
-
 class BluetoothClient:
     def __init__(self, device_mac_address: str, DEBUG: bool = True):
         self.device_mac_address = device_mac_address
@@ -60,7 +42,8 @@ class BluetoothClient:
                 await self.client.connect()
                 break
             except Exception as e:
-                print(f"failed to connect ! {e}")            
+                if self.DEBUG:
+                    print(f"failed to connect ! {e}")            
     
         if self.DEBUG:
             print(f"Connected to {self.device_mac_address}")
@@ -68,24 +51,21 @@ class BluetoothClient:
         try:
             while self.client.is_connected:
                 await asyncio.sleep(1)  # Check every second
-            print("Device disconnected. Attempting to reconnect...")
+            if self.DEBUG:
+                print("Device disconnected. Attempting to reconnect...")
         except BleakError as e:
-            print(f"Error while monitoring connection: {e}")
+            if self.DEBUG:
+                print(f"Error while monitoring connection: {e}")
         finally:
             await self.connect()  # Start reconnection attempts
-
-    # async def send_message_str(self, message: str):
-    #     """Send a message (str) to the device."""
-    #     THIS_UUID = self.CHARACTERISTIC_UUID_TX
-    #     await self.client.write_gatt_char(THIS_UUID, message)
-    #     print(f"Sent {message}")
 
     async def async_send_message_bytes(self, message: bytearray):
         """Send a message (bytearray) to the device. Ex: b'\x00\x01\x02\x03' """
         # THIS_UUID = uuid4()
         THIS_UUID = self.CHARACTERISTIC_UUID_TX
         await self.client.write_gatt_char(THIS_UUID, message, response=True)
-        print(f"Sent {message}")
+        if self.DEBUG:
+            print(f"Sent {message}")
             
     def send_message_bytes(self, message: bytearray):
         """Non-blocking wrapper to call send_message_bytes() from a non-async function."""
@@ -93,7 +73,8 @@ class BluetoothClient:
             asyncio.run_coroutine_threadsafe(self.async_send_message_bytes(message), self.loop)
 
     async def _recv_message_callback(self, sender: BleakGATTCharacteristic, data: bytearray):
-        print(f"Received message from {sender}: {data}")
+        if self.DEBUG:
+            print(f"Received message from {sender}: {data}")
         if self.recv_message_callback:
             self.recv_message_callback(data)
         # encoded = bytearray()
@@ -134,8 +115,9 @@ def setup_bluetooth(*ESP32_BT_NAMES: str, use_mac_addresses: bool = False, DEBUG
         # Browse nearby Bluetooth clients
         device_finder = BluetoothDeviceFinder()
         nearby_devices = device_finder.browse_devices()
-        for addr, name in nearby_devices:
-            print(f"Found: {addr} - {name}")
+        if DEBUG:
+            for addr, name in nearby_devices:
+                print(f"Found: {addr} - {name}")
 
         # Find Bluetooth devices by given names
         for esp32_bt_name in ESP32_BT_NAMES:
@@ -159,3 +141,27 @@ def setup_bluetooth(*ESP32_BT_NAMES: str, use_mac_addresses: bool = False, DEBUG
         time.sleep(1)
     
     return clients
+
+class P1BtClient(BluetoothClient):
+
+    def __init__(self, device_mac_address, DEBUG = True):
+        super().__init__(device_mac_address, DEBUG)
+        self.recv_message_callback = self.callback_hit_p1
+    
+    def callback_hit_p1(self, data: bytearray):
+        print(f"Received message from P1: {data}")
+
+
+if __name__ == "__main__":
+    # # browse devices
+    # device_finder = BluetoothDeviceFinder()
+    # nearby_devices = device_finder.browse_devices()
+    # for addr, name in nearby_devices:
+    #     print(f"Found: {addr} - {name}")
+    
+    # connect to a device
+    client = BluetoothClient("E8:31:CD:CB:2F:EE")
+    client.connect_in_background()
+    while True:
+        client.send_message_bytes(b"Hello, ESP32!")
+        time.sleep(1)
