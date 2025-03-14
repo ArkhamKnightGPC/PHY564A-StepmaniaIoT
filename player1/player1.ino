@@ -5,8 +5,8 @@
 #include "minHeap.hpp"
 #include "esp_timer.h"
 
-const int ledInputPins[4] = {26, 13, 16, 12};
-const int buttonOutputPins[4] = {25, 14, 17, 4};
+const int ledInputPins[4] = {26, 13, 34, 35};
+const int buttonOutputPins[4] = {25, 14, 15, 21};
 
 minHeap arrowsColumns[4]; // Arrow arrival times
 
