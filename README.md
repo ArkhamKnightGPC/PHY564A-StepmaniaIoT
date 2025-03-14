@@ -8,7 +8,7 @@ Stepmania based game project for PHY564A Open Electronics course at Ecole polyte
 | ------------------------ | ------------------------- |
 | 26 (D3)  | 25 (D2)   |
 | 13 (D7)  | 14 (D6)   |
-| 16 (D11) | 17 (D10)  |
-| 12 (D13) | 4 (D12)   |
+| 34 (A2) | 15 (A4)  |
+| 35 (A3) | 21 (SDA)   |
 
 

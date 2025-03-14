@@ -1,117 +1,160 @@
-#include <WiFi.h>
-#include <PubSubClient.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+#include "minHeap.hpp"
+#include "esp_timer.h"
 
-#include "fifo.hpp"
+const int ledInputPins[4] = {26, 13, 34, 35};
+const int buttonOutputPins[4] = {25, 14, 15, 21};
 
-const char* ssid = "wifi-robot";
-const char* password = "";
-const char* mqtt_server = "192.168.0.103";
-WiFiClient espClient;
-PubSubClient client(espClient);
+minHeap arrowsColumns[4]; // Arrow arrival times
 
-const int ledInputPin = 25; //D2
-const int buttonOutputPin = 26;  //D3
+BLEServer* pServer = NULL;
+BLECharacteristic* txCharacteristic = NULL; // Transmit characteristic
+BLECharacteristic* rxCharacteristic = NULL; // Receive characteristic
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+uint32_t value = 0;
 
-fifo *myFifo;
+const int ledPin = 2; // Use the appropriate GPIO pin for your setup
 
-void setup_wifi() {
-  delay(50);
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
+#define ESP_UUID "19b10000-e8f2-537e-4f6c-d104768a1214"
+#define TX_UUID "19b10001-e8f2-537e-4f6c-d104768a1214" // Send data
+#define RX_UUID "19b10002-e8f2-537e-4f6c-d104768a1214" // Receive data
 
-  WiFi.begin(ssid, password);
-  int c=0;
-  while (WiFi.status() != WL_CONNECTED) {
-    c=c+1;
-    Serial.print(".");
-    if(c>10){
-        ESP.restart(); //let's try again :(
+class MyServerCallbacks: public BLEServerCallbacks {
+  void onConnect(BLEServer* pServer) override {
+    deviceConnected = true;
+  };
+
+  void onDisconnect(BLEServer* pServer) override {
+    deviceConnected = false;
+  }
+};
+
+// Callback class to handle received messages on RX_UUID
+class MyCharacteristicCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* rxCharacteristic) override {
+    uint8_t* receivedBytes = (uint8_t*)rxCharacteristic->getData(); // Get raw byte array
+    size_t length = rxCharacteristic->getLength(); // Get data length
+
+    if (length % 4 != 0) {
+      Serial.println("Error: Received data length is not a multiple of 4!");
+      return;
+    }
+
+    Serial.print("Received ");
+    Serial.print(length / 4);
+    Serial.println(" float values:");
+    int column;
+    for (size_t i = 0; i < length; i += 4) {
+      float value;
+      memcpy(&value, receivedBytes + i, sizeof(float)); // Convert 4 bytes to float
+
+      if(i == 0){//this indicates the column!!
+        column = (int)value;
+      }else{//this represents an arrow!
+        arrowsColumns[column].insert(value);
+      }
+
+      Serial.println(value, 6); // Print float with 6 decimal places
     }
   }
-  Serial.println(WiFi.localIP());
-}
+};
 
-void connect_mqttServer() {
-  while (!client.connected()) {//loop until reconnection
-      if(WiFi.status() != WL_CONNECTED){//check WiFi!
-        setup_wifi();
-      }
-
-      Serial.print("Attempting MQTT connection...");
-      if (client.connect("PLAYER1")){ 
-        Serial.println("connected!");
-        // Subscribe to topics here
-        client.subscribe("ping");
-        client.subscribe("reactionTimes");
-      } 
-      else {
-        //attempt not successful
-        Serial.print("failed, rc=");
-        Serial.print(client.state());
-        Serial.println(" trying again in 2 seconds");
-        delay(2000);
-      }
+// Function to send messages using TX_UUID
+void sendMessage(const char* message) {
+  if (deviceConnected) {
+    txCharacteristic->setValue(message);
+    txCharacteristic->notify();
+    Serial.print("Sent message: ");
+    Serial.println(message);
   }
 }
 
-void callback(char* topic, byte* message, unsigned int length) {
-  Serial.print("Message arrived on topic: ");
-  Serial.print(topic);
-  Serial.print(". Message: ");
-  String messageTemp;
-  
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)message[i]);
-    messageTemp += (char)message[i];
-  }
-  Serial.println();
-
-  if (String(topic) == "ping") {
-    client.publish("pong", "ping");
-  }
-  if (String(topic) == "reactionTimes") {
-    client.publish("reactionTimes", String(myFifo->pop()).c_str());
-  }
-
-}
-
-void IRAM_ATTR ISR() {
+void IRAM_ATTR ButtonEvent() {
   Serial.println("INTERRUPT WAS TRIGGERED!");
 
-  int buttonState = digitalRead(buttonOutputPin);
-  if(buttonState == 0){ //button pressed
+  for(int i=0; i<4; i++){
+    int buttonState = digitalRead(buttonOutputPins[i]);
+    if(buttonState == 0){ //button pressed
+      
+      int64_t esp_time = esp_timer_get_time();
+      float reactionTime = float(esp_time);
+      float arrowTime = arrowsColumns[i].extractMin();
 
-    //int reactionTime = millis();
-    int reactionTime = 100;
-    myFifo->add(reactionTime);//add reaction time to FIFO
+      if(abs(reactionTime - arrowTime) < 2 || true){
+        String message = "HIT " + String(i) + " " + String(arrowTime) + " " + String(reactionTime);
+        sendMessage(message.c_str());//arrow has been popped from heap! we send message and move on!
+      }else{
+        arrowsColumns[i].insert(arrowTime); //insert time back into minHeap
+      }
 
-    digitalWrite(ledInputPin, HIGH);
-  }else{
-    digitalWrite(ledInputPin, LOW);
+      digitalWrite(ledInputPins[i], HIGH);
+    }else{
+      digitalWrite(ledInputPins[i], LOW);
+    }
   }
 }
 
 void setup() {
   Serial.begin(115200);
+  
+  for(int i=0; i<4; i++){
+    pinMode(ledInputPins[i], OUTPUT);
+    pinMode(buttonOutputPins[i], INPUT_PULLUP);
+    attachInterrupt(buttonOutputPins[i], ButtonEvent, FALLING);
+  }
 
-  setup_wifi();
-  client.setServer(mqtt_server, 1883);//1883 is the default port for MQTT server
-  client.setCallback(callback);
+  BLEDevice::init("STEPMANIAplayer1");
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+  BLEService *pService = pServer->createService(ESP_UUID);
 
-  pinMode(ledInputPin, OUTPUT);
-  pinMode(buttonOutputPin, INPUT_PULLUP);
+  // Create a BLE Characteristic for TX
+  txCharacteristic = pService->createCharacteristic(
+                      TX_UUID,
+                      BLECharacteristic::PROPERTY_READ   |
+                      BLECharacteristic::PROPERTY_NOTIFY
+                    );
 
-  attachInterrupt(buttonOutputPin, ISR, CHANGE);
+  // Create a BLE Characteristic for RX
+  rxCharacteristic = pService->createCharacteristic(
+                      RX_UUID,
+                      BLECharacteristic::PROPERTY_WRITE
+                    );
 
-  myFifo = new fifo();
+  // Register callback for RX_UUID
+  rxCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
 
-  Serial.println("SETUP IS DONE");
+  // Add descriptors
+  txCharacteristic->addDescriptor(new BLE2902());
+  rxCharacteristic->addDescriptor(new BLE2902());
+
+  // Start the service
+  pService->start();
+
+  // Start advertising
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(ESP_UUID);
+  pAdvertising->setScanResponse(false);
+  pAdvertising->setMinPreferred(0x0);  
+  BLEDevice::startAdvertising();
+  Serial.println("Waiting for client connection...");
 }
 
 void loop() {
-  if (!client.connected()) {
-    connect_mqttServer();
+  // Handle connection status
+  if (!deviceConnected && oldDeviceConnected) {
+    Serial.println("Device disconnected.");
+    delay(500);
+    pServer->startAdvertising(); 
+    Serial.println("Start advertising");
+    oldDeviceConnected = deviceConnected;
   }
-  client.loop();
+  if (deviceConnected && !oldDeviceConnected) {
+    oldDeviceConnected = deviceConnected;
+    Serial.println("Device Connected");
+  }
 }
