@@ -2,8 +2,6 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
-#include <stdlib.h>
-#include <WiFi.h>
 #include "minHeap.hpp"
 
 const int ledInputPins[4] = {26, 13, 16, 12};
@@ -23,24 +21,6 @@ const int ledPin = 2; // Use the appropriate GPIO pin for your setup
 #define ESP_UUID "19b10000-e8f2-537e-4f6c-d104768a1214"
 #define TX_UUID "19b10001-e8f2-537e-4f6c-d104768a1214" // Send data
 #define RX_UUID "19b10002-e8f2-537e-4f6c-d104768a1214" // Receive data
-
-void setup_wifi() {
-  delay(50);
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-
-  WiFi.begin(ssid, password);
-  int c=0;
-  while (WiFi.status() != WL_CONNECTED) {
-    c=c+1;
-    Serial.print(".");
-    if(c>10){
-        ESP.restart(); //let's try again :(
-    }
-  }
-  Serial.println(WiFi.localIP());
-}
 
 class MyServerCallbacks: public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) override {
@@ -99,11 +79,12 @@ void IRAM_ATTR ButtonEvent() {
     int buttonState = digitalRead(buttonOutputPins[i]);
     if(buttonState == 0){ //button pressed
       
-      float reactionTime = 100;
+      float reactionTime = millis();
       float arrowTime = arrowsColumns[i].extractMin();
 
       if(abs(reactionTime - arrowTime) < 2){
-        sendMessage("HIT");//arrow has been popped from heap! we send message and move on!
+        String message = "HIT " + String(i) + " " + String(arrowTime);
+        sendMessage(message.c_str());//arrow has been popped from heap! we send message and move on!
       }else{
         arrowsColumns[i].insert(arrowTime); //insert time back into minHeap
       }
@@ -162,10 +143,6 @@ void setup() {
 }
 
 void loop() {
-  if(WiFi.status() != WL_CONNECTED){//check WiFi!
-    setup_wifi();
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-  }
   // Handle connection status
   if (!deviceConnected && oldDeviceConnected) {
     Serial.println("Device disconnected.");

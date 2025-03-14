@@ -60,7 +60,7 @@ typedef struct minHeap {
     // Function to extract the minimum element (root) from the heap
     float extractMin() {
         if (heap.empty()) {
-            return -1;  // or throw an exception
+            return -1;
         }
 
         // The minimum element is at the root
