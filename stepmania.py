@@ -8,7 +8,7 @@ import threading
 from itertools import chain
 from BluetoothImplementation import bluetooth_definition as bt
 
-BTCLIENTS = ["E8:31:CD:CB:2F:EE", "E8:31:CD:CB:2F:EC"]
+BTCLIENTS = ["E8:31:CD:CB:2F:EE", "44:17:93:E0:D8:A2"]
 RESOURCE_PATH = Path("./Resources/").absolute()
 DIR_DICT = {0: "left", 1: "down", 2: "up", 3: "right"}
 DIR_DICT_INV = {"left": 0, "down": 1, "up": 2, "right": 3}
@@ -41,9 +41,9 @@ class Stepmania:
     def __init__(self):
         """Class to simulate a stepmania game"""
         print(f"Setting up bluetooth connections for {BTCLIENTS}")
-        self.bluetooth_clients = bt.setup_bluetooth(*BTCLIENTS, use_mac_addresses=True)
-        self.bluetooth_clients[0].recv_message_callback = self._bluetooth_player1_callback
-        self.bluetooth_clients[1].recv_message_callback = self._bluetooth_player2_callback
+        self.bluetooth_clients = [ bt.setup_bluetooth(BTCLIENTS[i], use_mac_addresses=True) for i in range(2)]
+        self.bluetooth_clients[0][0].recv_message_callback = self._bluetooth_player1_callback
+        self.bluetooth_clients[1][0].recv_message_callback = self._bluetooth_player2_callback
 
         print("Initializing pygame...")
         pygame.init()
@@ -105,18 +105,6 @@ class Stepmania:
         while self.running: # Main loop
             self.screen.fill((0, 0, 0))
             current_time = time.perf_counter()
-
-            # Spawn new arrows at whole measures (4 beats)
-            if current_time >= self.next_measure_time:
-                self.next_measure_time += 4*60 / self.BPM
-                if len(self.arrow_block_queue) > 0:
-                    block = self.arrow_block_queue.popleft()
-                    self.spawn_arrow_block(current_time, block)
-                if self.do_measure:
-                    self.do_measure()
-                
-                # spawn measure line
-                self.measure_lines.append(MeasureLine(current_time))
             
             if current_time >= self.next_beat_time:
                 self.next_beat_time += 60 / self.BPM
@@ -139,7 +127,7 @@ class Stepmania:
                 else:
                     measure_line.draw(self.screen)
             for i in range(len(self.bluetooth_clients)): # Draw bluetooth markers
-                if self.bluetooth_clients[i].client.is_connected:
+                if self.bluetooth_clients[i][0].client.is_connected:
                     self.playerbtmarkers[i].draw(self.screen)
 
             def do_arrow_draw(dir_index: int) -> None: # for all arrows
@@ -517,8 +505,6 @@ def EventBT_parse_message_and_send_events(message: bytearray, game) -> None:
     # decode bluetooth message as string as ascii
     try:
         message_str = message.decode("ascii")
-        # _, i, tarrow, treaction = message_str.split(" ")
-        # i, tarrow, treaction = int(i) - 1, float(tarrow), float(treaction)
         hit_str_, i = message_str.split(" ")
         i = int(i) - 1
     except Exception as e:
@@ -531,9 +517,11 @@ def EventBT_parse_message_and_send_events(message: bytearray, game) -> None:
 
 if __name__ == "__main__":
     game = Stepmania()
+
     block1 = []
     for i in range(np.random.randint(1,5)):
         block1.append(random_arrow_line(np.random.randint(1,2)))
+
     game.arrow_block_queue.append(block1)
     def do_measure_make_new_block():
         block = []
@@ -548,5 +536,6 @@ if __name__ == "__main__":
             block.append(random_arrow_line(np.random.randint(1,2)))
         game.arrow_block_queue.append(block)
     game.do_measure = do_measure_make_new_block
+
     game.start()
     pygame.quit()
