@@ -8,7 +8,7 @@ import threading
 from itertools import chain
 from BluetoothImplementation import bluetooth_definition as bt
 
-BTCLIENTS = ["E8:31:CD:CB:2F:EE"]
+BTCLIENTS = ["E8:31:CD:CB:2F:EE", "E8:31:CD:CB:2F:EC"]
 RESOURCE_PATH = Path("./Resources/").absolute()
 DIR_DICT = {0: "left", 1: "down", 2: "up", 3: "right"}
 DIR_DICT_INV = {"left": 0, "down": 1, "up": 2, "right": 3}
@@ -40,27 +40,48 @@ class Stepmania:
 
     def __init__(self):
         """Class to simulate a stepmania game"""
+        print(f"Setting up bluetooth connections for {BTCLIENTS}")
         self.bluetooth_clients = bt.setup_bluetooth(*BTCLIENTS, use_mac_addresses=True)
-        self.bluetooth_clients[0].recv_message_callback = self._bluetooth_callback
+        self.bluetooth_clients[0].recv_message_callback = self._bluetooth_player1_callback
+        self.bluetooth_clients[1].recv_message_callback = self._bluetooth_player2_callback
 
+        print("Initializing pygame...")
         pygame.init()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
+        
+        print("Loading resources...")
         Arrow._load_images()
         MarkerArrow._load_image()
+        BeatSoundMaker._load_beat_sounds()
+        MarkerSpawn._load_image()
+        PlayerBtMarker._load_images()
+
+        print("Final setups...")
         self.score_recorder = ScoreRecorder()
         self.font = pygame.font.Font(None, 36)
+        self.beat_sound_maker = BeatSoundMaker()
 
         # Arrow properties
         self.bottom_y = HEIGHT - 100  # Where arrows should be hit
         self.SCROLL_SPEED = 350
         
         self.running = False
+        self.playerbtmarkers : tuple[PlayerBtMarker, PlayerBtMarker] = (
+            PlayerBtMarker("player1"),
+            PlayerBtMarker("player2")
+        )
         self.arrow_markers: tuple[MarkerArrow, MarkerArrow, MarkerArrow, MarkerArrow] = (
             MarkerArrow("left"),
             MarkerArrow("down"),
             MarkerArrow("up"),
             MarkerArrow("right")
+        )
+        self.spawn_markers: tuple[MarkerSpawn, MarkerSpawn, MarkerSpawn, MarkerSpawn] = (
+            MarkerSpawn("left"),
+            MarkerSpawn("down"),
+            MarkerSpawn("up"),
+            MarkerSpawn("right")
         )
         self.arrows: tuple[list[Arrow]] = ([], [], [], []) # Arrows for each direction
         self.measure_lines: list[MeasureLine] = []
@@ -75,9 +96,11 @@ class Stepmania:
 
     def start(self):
         """Starts the game loop"""
+        print("Starting game loop...")
         self.running = True
         self.start_time = time.perf_counter()
         self.next_measure_time = self.start_time
+        self.next_beat_time = self.start_time
 
         while self.running: # Main loop
             self.screen.fill((0, 0, 0))
@@ -94,20 +117,30 @@ class Stepmania:
                 
                 # spawn measure line
                 self.measure_lines.append(MeasureLine(current_time))
-                
+            
+            if current_time >= self.next_beat_time:
+                self.next_beat_time += 60 / self.BPM
+                self.beat_sound_maker.play_beat_sound()                
             
             # Draw and updates
             self.draw_text(f"Score: {self.score_recorder.score} (combo: {self.score_recorder.combo})", 10, 10)
             self.draw_text(f"BPM: {self.BPM:.2f}", 10, 40)
             self.draw_text(f"Speed: {self.SCROLL_SPEED:.2f}", 10, 70)
-            for marker_arrow in self.arrow_markers:
+            for marker_arrow in self.arrow_markers: # Draw arrow markers
                 marker_arrow.draw(self.screen)
-            for measure_line in self.measure_lines:
+            for marker_arrow in self.arrow_markers: # Reset arrow markers
+                marker_arrow.is_pressed = False
+            for marker_spawn in self.spawn_markers: # Draw arrow spawn markers
+                marker_spawn.draw(self.screen)
+            for measure_line in self.measure_lines: # Draw measure lines
                 measure_line.update(current_time, HEIGHT, self.SCROLL_SPEED, self.BPM)
                 if measure_line.y < -50:
                     self.measure_lines.remove(measure_line)
                 else:
                     measure_line.draw(self.screen)
+            for i in range(len(self.bluetooth_clients)): # Draw bluetooth markers
+                if self.bluetooth_clients[i].client.is_connected:
+                    self.playerbtmarkers[i].draw(self.screen)
 
             def do_arrow_draw(dir_index: int) -> None: # for all arrows
                 for arrow in self.arrows[dir_index]:
@@ -146,21 +179,35 @@ class Stepmania:
                     else:
                         if event.key == pygame.K_LEFT:
                             do_arrow_hit(DIR_DICT_INV["left"])
+                            self.arrow_markers[0].is_pressed = True
                         elif event.key == pygame.K_DOWN:
                             do_arrow_hit(DIR_DICT_INV["down"])
+                            self.arrow_markers[1].is_pressed = True
                         elif event.key == pygame.K_UP:
                             do_arrow_hit(DIR_DICT_INV["up"])
+                            self.arrow_markers[2].is_pressed = True
                         elif event.key == pygame.K_RIGHT:
                             do_arrow_hit(DIR_DICT_INV["right"])
+                            self.arrow_markers[3].is_pressed = True
                         elif event.key == pygame.K_ESCAPE:
                             self.running = False
+                        elif event.key == pygame.K_u:
+                            self._spawn_arrow_now(0)
+                        elif event.key == pygame.K_i:
+                            self._spawn_arrow_now(1)
+                        elif event.key == pygame.K_o:
+                            self._spawn_arrow_now(2)
+                        elif event.key == pygame.K_p:
+                            self._spawn_arrow_now(3)
                         # else:
                         #     print(f"Key pressed: {event.key}, {pygame.key.name(event.key)}, {pygame.K_LEFT}")
                 elif event.type == pygame.USEREVENT:
-                    if "arrow_timestamp" in event.dict and "dir_index" in event.dict:
-                        print(f"Received event: {event.dict["arrow_timestamp"]}, {event.dict["dir_index"]}")
+                    if "dir_index" in event.dict:
+                        dir_index = event.dict["dir_index"]
+                        print(f"Received event: dir_index={dir_index}")
+                        self.arrow_markers[dir_index].is_pressed = True
                         # self.score_recorder.check_hit(current_time, event.dict["arrow_timestamp"], event.dict["dir_index"])
-                        do_arrow_hit(event.dict["dir_index"])
+                        do_arrow_hit(dir_index)
             pygame.display.flip()
             self.clock.tick(60)
 
@@ -221,10 +268,28 @@ class Stepmania:
         text_surface = self.font.render(text, True, (255, 255, 255))
         self.screen.blit(text_surface, (x, y))
 
-    def _bluetooth_callback(self, data: bytearray):
+    def _bluetooth_player1_callback(self, data: bytearray):
         """Callback for bluetooth messages"""
-        print(f"Received message: {data}")
+        print(f"Received message from player 1: {data}")
         EventBT_parse_message_and_send_events(data, self)
+        
+    def _bluetooth_player2_callback(self, data: bytearray):
+        """Callback for bluetooth messages"""
+        print(f"Received message from player 2: {data}")
+        try:
+            message_str = data.decode("ascii")
+            hit_str_, i = message_str.split(" ")
+            i = int(i) - 1
+        except Exception as e:
+            print(f"Error parsing message: {e}")
+            return
+        self._spawn_arrow_now(i)
+
+    def _spawn_arrow_now(self, dir_index: int):
+        """Spawns an arrow now"""
+        time_offset = 60 / self.BPM * 4 / 4  
+        self.spawn_arrow(DIR_DICT[dir_index], "white", time.perf_counter() + time_offset * dir_index)
+        self.spawn_markers[dir_index].schedule_draw()
 
 class ScoreRecorder:
     """Class to record the score of a player"""
@@ -240,7 +305,7 @@ class ScoreRecorder:
         self.tap_sounds = {"clap": pygame.mixer.Sound(RESOURCE_PATH / "GameplayAssist clap.ogg")}
         for i in self.ACCEPTABLE_SOUNDS:
             self.tap_sounds[f"piano_{i:03}"] = pygame.mixer.Sound(RESOURCE_PATH / "piano" / f"jobro__piano-ff-{i:03}.ogg")
-            print(f"Loaded piano_{i:03} at {RESOURCE_PATH / 'piano' / f'jobro__piano-ff-{i:03}.ogg'}")
+            # print(f"Loaded piano_{i:03} at {RESOURCE_PATH / 'piano' / f'jobro__piano-ff-{i:03}.ogg'}")
     
     def check_hit(self, current_time: float, arrow_0_time: float, dir_index: int) -> bool:
         """Checks if the player hit an arrow. Returns True if the arrow was hit."""
@@ -262,18 +327,16 @@ class ScoreRecorder:
                 min_index = self.current_sound_index + new_index_offset
                 min_index = min(min_index, len(self.ACCEPTABLE_SOUNDS)-2)
                 max_index = len(self.ACCEPTABLE_SOUNDS)-1
-                print(f"min_index: {min_index}, max_index: {max_index}")
                 new_index = np.random.randint(min_index, max_index)
             else: # left
                 min_index = 0
                 max_index = self.current_sound_index + new_index_offset
                 max_index = max(1, max_index)
-                print(f"min_index: {min_index}, max_index: {max_index}")
                 new_index = np.random.randint(min_index, max_index)
 
         sound = self.tap_sounds[f"piano_{self.ACCEPTABLE_SOUNDS[new_index]:03}"]
         sound.play(maxtime=500)
-        print(f"======\ndir_index: {dir_index}\nlast_dir_index: {self.last_dir_index},\ncurrent_sound_index: {self.current_sound_index},\nnew_index: {new_index}")
+        # print(f"======\ndir_index: {dir_index}\nlast_dir_index: {self.last_dir_index},\ncurrent_sound_index: {self.current_sound_index},\nnew_index: {new_index}")
         self.last_dir_index = dir_index # update
         self.current_sound_index = new_index
     def record_miss(self):
@@ -356,6 +419,7 @@ class MarkerArrow:
     def __init__(self, direction: Literal["left","up","right","down"] = "left"):
         self.x = get_arrow_x(direction, WIDTH, ARROW_SIZE, WIDTH//2)
         self.y = ZERO_Y - ARROW_SIZE//2
+        self.is_pressed = False
         if direction == "left":
             self.img = MarkerArrow.marker_img
         elif direction == "down":
@@ -368,6 +432,8 @@ class MarkerArrow:
             raise ValueError(f"Invalid direction {direction}")
         
     def draw(self, screen: pygame.Surface):
+        if self.is_pressed:
+            pygame.draw.rect(screen, (255, 255, 255), (self.x, self.y, ARROW_SIZE, ARROW_SIZE), 3)
         screen.blit(self.img, (self.x, self.y))
 
     @staticmethod
@@ -375,20 +441,86 @@ class MarkerArrow:
         MarkerArrow.marker_img = pygame.image.load(RESOURCE_PATH / "ArrowMarker.png")
         MarkerArrow.marker_img = pygame.transform.scale(MarkerArrow.marker_img, (ARROW_SIZE, ARROW_SIZE))
 
+class MarkerSpawn:
+    """Class to represent an marker arrow spawn asset"""
+    marker_img: pygame.Surface = None
+    SHOWN_FRAMES = 5
+    def __init__(self, direction: Literal["left","up","right","down"] = "left"):
+        self.x = get_arrow_x(direction, WIDTH, ARROW_SIZE, WIDTH//2)
+        # self.y = HEIGHT - ARROW_SIZE//2
+        self.y = HEIGHT - 80
+        self.draw_counter = 0
+    
+    def schedule_draw(self):
+        self.draw_counter = MarkerSpawn.SHOWN_FRAMES
+    
+    def draw(self, screen: pygame.Surface):
+        if self.draw_counter > 0:
+            self.draw_counter -= 1
+            screen.blit(MarkerSpawn.marker_img, (self.x, self.y))
+    
+    @staticmethod
+    def _load_image():
+        MarkerSpawn.marker_img = pygame.image.load(RESOURCE_PATH / "ArrowSpawn.png")
+        MarkerSpawn.marker_img = pygame.transform.scale(MarkerSpawn.marker_img, (ARROW_SIZE, ARROW_SIZE))
+
+class PlayerBtMarker:
+    player1_img: pygame.Surface = None
+    player2_img: pygame.Surface = None
+    SIZE = 50
+    def __init__(self, player: Literal["player1", "player2"]):
+        self.x = 0
+        self.y = HEIGHT - PlayerBtMarker.SIZE
+        if player == "player1":
+            self.img = PlayerBtMarker.player1_img
+            self.x = 0
+        elif player == "player2":
+            self.img = PlayerBtMarker.player2_img
+            self.x = WIDTH - PlayerBtMarker.SIZE
+        else:
+            raise ValueError(f"Invalid player {player}")
+        
+    def draw(self, screen: pygame.Surface):
+        screen.blit(self.img, (self.x, self.y))
+    
+    @staticmethod
+    def _load_images():
+        PlayerBtMarker.player1_img = pygame.image.load(RESOURCE_PATH / "Player1.png")
+        PlayerBtMarker.player1_img = pygame.transform.scale(PlayerBtMarker.player1_img, (PlayerBtMarker.SIZE, PlayerBtMarker.SIZE))
+        PlayerBtMarker.player2_img = pygame.image.load(RESOURCE_PATH / "Player2.png")
+        PlayerBtMarker.player2_img = pygame.transform.scale(PlayerBtMarker.player2_img, (PlayerBtMarker.SIZE, PlayerBtMarker.SIZE))
+        
+
 class BeatSoundMaker:
+    beatTic: pygame.mixer.Sound = None
+    beatTac: pygame.mixer.Sound = None
     def __init__(self):
-        self.beat_sounds = {}
-        # TODO
+        self.count = 0
+    
+    def play_beat_sound(self):
+        """Plays a beat sound"""
+        if self.count % 4 == 0:
+            self.beatTac.play()
+        else:
+            self.beatTic.play()
+        self.count += 1
+
+    @staticmethod
+    def _load_beat_sounds():
+        BeatSoundMaker.beatTic = pygame.mixer.Sound(RESOURCE_PATH / "Tic.ogg")
+        BeatSoundMaker.beatTac = pygame.mixer.Sound(RESOURCE_PATH / "Tac.ogg")
+
+
 
 def EventBT_parse_message_and_send_events(message: bytearray, game) -> None:
     """Parses a bluetooth message to spawn the relevant events."""
     # decode bluetooth message as string as ascii
     try:
         message_str = message.decode("ascii")
-        _, i, tarrow, treaction = message_str.split(" ")
-        i, tarrow, treaction = int(i) - 1, float(tarrow), float(treaction)
-        # hit_str, i = message_str.split(" ")
-        # i = int(i) - 1
+        # _, i, tarrow, treaction = message_str.split(" ")
+        # i, tarrow, treaction = int(i) - 1, float(tarrow), float(treaction)
+        hit_str_, i = message_str.split(" ")
+        i = int(i) - 1
     except Exception as e:
         print(f"Error parsing message: {e}")
         return 
