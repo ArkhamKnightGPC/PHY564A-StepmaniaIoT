@@ -14,7 +14,7 @@ DIR_DICT = {0: "left", 1: "down", 2: "up", 3: "right"}
 DIR_DICT_INV = {"left": 0, "down": 1, "up": 2, "right": 3}
 ARROW_SIZE = 100
 WIDTH, HEIGHT = 600, 800
-MEASURE_MARGIN = 4 # number of measures to summon the arrows before they reach the markers at ZERO_Y
+MEASURE_MARGIN = 1 # number of measures to summon the arrows before they reach the markers at ZERO_Y
 ZERO_Y = 80
 
 def get_arrow_x(direction: str, screen_width: int, arrow_width: int, area_width: int):
@@ -167,7 +167,7 @@ class Stepmania:
                     to_remove = []
                     time_1_measure = 4*60/self.BPM
                     for arrow in self.arrows[dir_index]:
-                        arrow_0_time = arrow.spawn_time + time_1_measure * 4
+                        arrow_0_time = arrow.spawn_time + time_1_measure * MEASURE_MARGIN
                         if self.score_recorder.check_hit(current_time, arrow_0_time, dir_index):
                             self.score_recorder.register_hit()
                             self.score_recorder_p2.register_miss()
@@ -307,9 +307,12 @@ class Stepmania:
 
     def _spawn_arrow_now(self, dir_index: int):
         """Spawns an arrow now"""
-        time_offset = 60 / self.BPM * 4 / 4  
-        self.spawn_arrow(DIR_DICT[dir_index], "white", time.perf_counter() + time_offset * dir_index)
+        time_offset = 60 / self.BPM * 4 / 4 
+        time_now = time.perf_counter()
+
+        self.spawn_arrow(DIR_DICT[dir_index], "white", time_now + time_offset)
         self.spawn_markers[dir_index].schedule_draw()
+        
 
 class ScoreRecorder:
     """Class to record the score of a player"""
@@ -329,6 +332,7 @@ class ScoreRecorder:
     
     def check_hit(self, current_time: float, arrow_0_time: float, dir_index: int) -> bool:
         """Checks if the player hit an arrow. Returns True if the arrow was hit."""
+        print(f"current_time: {current_time}, arrow_0_time: {arrow_0_time}")
         if abs(current_time - arrow_0_time) < 0.1:
             self.play_sound(dir_index)
             return True
@@ -389,12 +393,10 @@ class Arrow:
     def update(self, current_time, height: int, scroll_speed: int, BPM: int):
         time_1_measure = 4*60/BPM
         speed = scroll_speed
-        spawn_y = ZERO_Y + 4 * time_1_measure * speed
+        spawn_y = ZERO_Y + MEASURE_MARGIN * time_1_measure * speed
 
         t = current_time - self.spawn_time
-        self.y = ZERO_Y + (spawn_y - ZERO_Y)*(1 - t / (4 * time_1_measure)) - ARROW_SIZE//2
-
-
+        self.y = ZERO_Y + (spawn_y - ZERO_Y)*(1 - t / (MEASURE_MARGIN * time_1_measure)) - ARROW_SIZE//2
 
     def draw(self, screen: pygame.Surface):
         screen.blit(self.img, (self.x, self.y))
@@ -428,10 +430,10 @@ class MeasureLine:
     def update(self, current_time, height: int, scroll_speed: int, BPM: int):
         time_1_measure = 4*60/BPM
         speed = scroll_speed
-        spawn_y = ZERO_Y + 4 * time_1_measure * speed
+        spawn_y = ZERO_Y + MEASURE_MARGIN * time_1_measure * speed
 
         t = current_time - self.spawn_time
-        self.y = ZERO_Y + (spawn_y - ZERO_Y)*(1 - t / (4 * time_1_measure)) - MeasureLine.H//2
+        self.y = ZERO_Y + (spawn_y - ZERO_Y)*(1 - t / (MEASURE_MARGIN * time_1_measure)) - MeasureLine.H//2
 
     def draw(self, screen: pygame.Surface):
         screen.blit(self.img, (self.x, self.y))
@@ -562,10 +564,10 @@ if __name__ == "__main__":
     def do_measure_make_new_block():
         block = []
         choices_p = { # num of arrows : probability
-            1: 1/6,
+            1: 1/12,
             2: 1/3,
-            4: 1/3,
-            8: 1/6,}
+            4: 1/2,
+            8: 1/12,}
         keys = [i for i in choices_p.keys()]
         values = [i for i in choices_p.values()]
         for i in range(np.random.choice(keys, p=values)): # 4 beats
