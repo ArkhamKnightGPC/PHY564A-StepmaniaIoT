@@ -58,7 +58,9 @@ class Stepmania:
         PlayerBtMarker._load_images()
 
         print("Final setups...")
-        self.score_recorder = ScoreRecorder()
+        self.is_p2 = False # whether p2 is playing
+        self.score_recorder = ScoreRecorder(10)
+        self.score_recorder_p2 = ScoreRecorder(10)
         self.font = pygame.font.Font(None, 36)
         self.beat_sound_maker = BeatSoundMaker()
 
@@ -89,6 +91,7 @@ class Stepmania:
         self.next_measure_time= 0
         self.start_time = 0
         self.BPM = 120
+        self.is_gen_random = True # whether to generate random arrow blocks
 
         self.arrow_block_queue = deque()
         self.do_measure : Callable[[], None] = None # Function to call when a measure is reached
@@ -106,14 +109,30 @@ class Stepmania:
             self.screen.fill((0, 0, 0))
             current_time = time.perf_counter()
             
+            # Play beat sound at each beat
             if current_time >= self.next_beat_time:
                 self.next_beat_time += 60 / self.BPM
-                self.beat_sound_maker.play_beat_sound()                
+                self.beat_sound_maker.play_beat_sound()   
+
+            # Spawn new arrows at whole measures (4 beats)
+            if current_time >= self.next_measure_time and self.is_gen_random:
+                self.next_measure_time += 4*60 / self.BPM
+                if len(self.arrow_block_queue) > 0:
+                    block = self.arrow_block_queue.popleft()
+                    self.spawn_arrow_block(current_time, block)
+                if self.do_measure:
+                    self.do_measure()
+                
+                # spawn measure line
+                self.measure_lines.append(MeasureLine(current_time))
+                         
             
             # Draw and updates
             self.draw_text(f"Score: {self.score_recorder.score} (combo: {self.score_recorder.combo})", 10, 10)
             self.draw_text(f"BPM: {self.BPM:.2f}", 10, 40)
             self.draw_text(f"Speed: {self.SCROLL_SPEED:.2f}", 10, 70)
+            if self.is_p2:
+                self.draw_text(f"Score P2: {self.score_recorder_p2.score} (combo: {self.score_recorder_p2.combo})", 10, 100)
             for marker_arrow in self.arrow_markers: # Draw arrow markers
                 marker_arrow.draw(self.screen)
             for marker_arrow in self.arrow_markers: # Reset arrow markers
@@ -135,7 +154,8 @@ class Stepmania:
                     arrow.update(current_time, HEIGHT, self.SCROLL_SPEED, self.BPM)
                     if arrow.y < -50:
                         self.arrows[dir_index].remove(arrow)
-                        self.score_recorder.record_miss()
+                        self.score_recorder.register_miss()
+                        self.score_recorder_p2.register_hit(2)
                     else:
                         arrow.draw(self.screen)    
             for dir_index in range(len(self.arrows)):
@@ -149,6 +169,8 @@ class Stepmania:
                     for arrow in self.arrows[dir_index]:
                         arrow_0_time = arrow.spawn_time + time_1_measure * 4
                         if self.score_recorder.check_hit(current_time, arrow_0_time, dir_index):
+                            self.score_recorder.register_hit()
+                            self.score_recorder_p2.register_miss()
                             to_remove.append(arrow)
                             break # only hit one arrow
                     for arrow in to_remove:
@@ -164,6 +186,8 @@ class Stepmania:
                         self.BPM += 20
                     elif event.key == pygame.K_q:
                         self.BPM -= 20
+                    elif event.key == pygame.K_r:
+                        self.is_gen_random = not self.is_gen_random # toggle random generation
                     else:
                         if event.key == pygame.K_LEFT:
                             do_arrow_hit(DIR_DICT_INV["left"])
@@ -181,12 +205,20 @@ class Stepmania:
                             self.running = False
                         elif event.key == pygame.K_u:
                             self._spawn_arrow_now(0)
+                            self.is_p2 = True
+                            self.score_recorder_p2.register_miss() # cost 1
                         elif event.key == pygame.K_i:
                             self._spawn_arrow_now(1)
+                            self.is_p2 = True
+                            self.score_recorder_p2.register_miss() # cost 1
                         elif event.key == pygame.K_o:
                             self._spawn_arrow_now(2)
+                            self.is_p2 = True
+                            self.score_recorder_p2.register_miss() # cost 1
                         elif event.key == pygame.K_p:
                             self._spawn_arrow_now(3)
+                            self.is_p2 = True
+                            self.score_recorder_p2.register_miss() # cost 1
                         # else:
                         #     print(f"Key pressed: {event.key}, {pygame.key.name(event.key)}, {pygame.K_LEFT}")
                 elif event.type == pygame.USEREVENT:
@@ -283,9 +315,9 @@ class ScoreRecorder:
     """Class to record the score of a player"""
     ACCEPTABLE_SOUNDS = [28, 35, 40, 44, 47, 52, 56, 59, 64]
 
-    def __init__(self):
+    def __init__(self, initial_score: int = 0):
         """Class to record the score of a player"""
-        self.score = 0
+        self.score = initial_score
         self.combo = 0
         # self.tap_sound = pygame.mixer.Sound(RESOURCE_PATH / "GameplayAssist clap.ogg")
         self.current_sound_index = 0
@@ -298,8 +330,6 @@ class ScoreRecorder:
     def check_hit(self, current_time: float, arrow_0_time: float, dir_index: int) -> bool:
         """Checks if the player hit an arrow. Returns True if the arrow was hit."""
         if abs(current_time - arrow_0_time) < 0.1:
-            self.score += 1
-            self.combo += 1
             self.play_sound(dir_index)
             return True
         return False
@@ -327,9 +357,15 @@ class ScoreRecorder:
         # print(f"======\ndir_index: {dir_index}\nlast_dir_index: {self.last_dir_index},\ncurrent_sound_index: {self.current_sound_index},\nnew_index: {new_index}")
         self.last_dir_index = dir_index # update
         self.current_sound_index = new_index
-    def record_miss(self):
-        """Records a miss"""
-        self.score -= 1
+
+    def register_hit(self, points: int = 1):
+        """Registers a hit"""
+        self.score += points
+        self.combo += 1
+    
+    def register_miss(self, points: int = 1):
+        """Registers a miss"""
+        self.score -= points
         self.combo = 0
 
 class Arrow:
